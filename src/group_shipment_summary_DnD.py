@@ -278,6 +278,13 @@ def run_excel_to_tsv(pszInputExcelPath: str) -> None:
     ]
     if arrStep0013VarietyPaths:
         pszMessage += "\n\n一日平均出荷羽数の前年比付きstep0013 品種別TSV:\n" + "\n".join(arrStep0013VarietyPaths)
+    arrStep0013VarietyExcelPaths: List[str] = [
+        line[len("step0013品種別年間Excelファイル: ") :]
+        for line in pszStdOut.splitlines()
+        if line.startswith("step0013品種別年間Excelファイル: ")
+    ]
+    if arrStep0013VarietyExcelPaths:
+        pszMessage += "\n\nstep0013 品種別年間Excel:\n" + "\n".join(arrStep0013VarietyExcelPaths)
     arrStep0011VarietyDeductionPaths: List[str] = [
         line[len("step0011品種別控除廃棄年間ファイル: ") :]
         for line in pszStdOut.splitlines()
@@ -460,9 +467,11 @@ def draw_instruction_text(iWindowHandle: int) -> None:
         "右端に年間合計列を追加したstep0010品種別年間TSVを作成します。\n"
         "羽数・重量は月合計、平均体重と育成率は年間合計から再計算し、\n"
         "飼育日数平均は出荷羽数による加重平均を出力します。\n"
-        "step0010品種別年間TSVを読み込み、品種別シートの年間Excelを\n"
+        "step0013品種別年間TSVを読み込み、品種別シートの年間Excelを\n"
         "品種ごと・年ごとに出力します。\n"
-        "step0010品種別Excelの各列幅を自動調整します。\n"
+        "step0013品種別Excelの各列幅を自動調整します。\n"
+        "通常年48行・2022年39行に対応し、稼動日数・前年実績・前年比を反映します。\n"
+        "前年比は倍率を小数点以下4桁で表示し、通常版step0010年間Excelは作成しません。\n"
         "品種別step0011当年表に空行2行と前年の合計6項目・稼動日数の7行を追加し、\n"
         "step0012品種別年間TSVを出力します。\n"
         "当年step0012内の前年実績を使い、40・41行目に一日平均出荷羽数の前年比を表示した\n"
