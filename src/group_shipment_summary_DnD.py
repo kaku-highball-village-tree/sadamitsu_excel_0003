@@ -299,6 +299,13 @@ def run_excel_to_tsv(pszInputExcelPath: str) -> None:
     ]
     if arrStep0013VarietyDeductionPaths:
         pszMessage += "\n\n一日平均処理羽数の前年比付きstep0013 品種別控除廃棄TSV:\n" + "\n".join(arrStep0013VarietyDeductionPaths)
+    arrStep0013VarietyDeductionExcelPaths: List[str] = [
+        line[len("step0013品種別控除廃棄年間Excelファイル: ") :]
+        for line in pszStdOut.splitlines()
+        if line.startswith("step0013品種別控除廃棄年間Excelファイル: ")
+    ]
+    if arrStep0013VarietyDeductionExcelPaths:
+        pszMessage += "\n\nstep0013 品種別控除廃棄Excel:\n" + "\n".join(arrStep0013VarietyDeductionExcelPaths)
     arrStep0012Paths: List[str] = [
         line[len("step0012グループ別年間ファイル: ") :]
         for line in pszStdOut.splitlines()
@@ -479,9 +486,11 @@ def draw_instruction_text(iWindowHandle: int) -> None:
         "羽数・重量は年間合計、控除後平均体重と育成率は年間値から再計算し、\n"
         "飼育日数平均は処理羽数による加重平均を追加した\n"
         "step0010品種別控除廃棄年間TSVを年ごとに出力します。\n"
-        "控除廃棄版step0010品種別年間TSVを読み込み、\n"
+        "控除廃棄版step0013品種別年間TSVを読み込み、\n"
         "品種別シートの年間Excelファイルを年ごとに出力します。\n"
-        "控除廃棄版step0010品種別Excelの各列幅を自動調整します。\n"
+        "控除廃棄版step0013品種別Excelの各列幅を自動調整します。\n"
+        "Excelは通常年48行・2022年39行に対応し、合計・稼動日数・前年実績・前年比を反映します。\n"
+        "前年比は倍率を小数点以下4桁で表示し、step0010の年間Excelは作成しません。\n"
         "控除廃棄版品種別step0010と同年・同接頭辞の日別稼動判定TSVを読み、\n"
         "全品種共通の稼動日数行を追加した39行のstep0011を作成します。年間稼動日数は空欄です。\n"
         "step0011は同名時に連番で保存し、今回作成したファイルを後続処理へ渡します。\n"
