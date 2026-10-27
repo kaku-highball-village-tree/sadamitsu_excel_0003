@@ -264,6 +264,13 @@ def run_excel_to_tsv(pszInputExcelPath: str) -> None:
     ]
     if arrDailyOperationPaths:
         pszMessage += "\n\n日別稼動判定TSV:\n" + "\n".join(arrDailyOperationPaths)
+    arrStep0012VarietyPaths: List[str] = [
+        line[len("step0012品種別年間ファイル: ") :]
+        for line in pszStdOut.splitlines()
+        if line.startswith("step0012品種別年間ファイル: ")
+    ]
+    if arrStep0012VarietyPaths:
+        pszMessage += "\n\n前年実績付きstep0012 品種別TSV:\n" + "\n".join(arrStep0012VarietyPaths)
     arrStep0012Paths: List[str] = [
         line[len("step0012グループ別年間ファイル: ") :]
         for line in pszStdOut.splitlines()
@@ -414,6 +421,10 @@ def draw_instruction_text(iWindowHandle: int) -> None:
         "step0010品種別年間TSVを読み込み、品種別シートの年間Excelを\n"
         "品種ごと・年ごとに出力します。\n"
         "step0010品種別Excelの各列幅を自動調整します。\n"
+        "品種別step0011当年表に空行2行と前年の合計6項目・稼動日数の7行を追加し、\n"
+        "step0012品種別年間TSVを出力します。\n"
+        "当年・前年の稼動日数の年間合計をO列に整数で設定します。\n"
+        "前年欄は前年実績・前年の年表記とし、2022年は前年行と空行を追加しません。\n"
         "入雛羽数・処理羽数・処理重量・控除後平均体重・\n"
         "飼育日数平均・廃棄控除後育成率を品種ごとに結合し、\n"
         "控除廃棄版step0004を5区分出力します。\n"
