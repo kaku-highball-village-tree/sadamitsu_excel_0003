@@ -285,6 +285,13 @@ def run_excel_to_tsv(pszInputExcelPath: str) -> None:
     ]
     if arrStep0012VarietyDeductionPaths:
         pszMessage += "\n\n前年実績付きstep0012 品種別控除廃棄TSV:\n" + "\n".join(arrStep0012VarietyDeductionPaths)
+    arrStep0013VarietyDeductionPaths: List[str] = [
+        line[len("step0013品種別控除廃棄年間ファイル: ") :]
+        for line in pszStdOut.splitlines()
+        if line.startswith("step0013品種別控除廃棄年間ファイル: ")
+    ]
+    if arrStep0013VarietyDeductionPaths:
+        pszMessage += "\n\n一日平均処理羽数の前年比付きstep0013 品種別控除廃棄TSV:\n" + "\n".join(arrStep0013VarietyDeductionPaths)
     arrStep0012Paths: List[str] = [
         line[len("step0012グループ別年間ファイル: ") :]
         for line in pszStdOut.splitlines()
@@ -471,6 +478,10 @@ def draw_instruction_text(iWindowHandle: int) -> None:
         "同じ出力フォルダに対象年・接頭辞が一致する控除廃棄版品種別step0011がある場合、\n"
         "当年・前年step0011を読み、空行2行と前年合計6項目・稼動日数の7行を追加した\n"
         "step0012品種別控除廃棄年間TSVを出力します。step0011自体は作成しません。\n"
+        "控除廃棄版step0012内の前年実績から一日平均処理羽数の前年比を計算し、\n"
+        "40・41行目を前年比と補足表示に置き換えたstep0013品種別控除廃棄年間TSVを出力します。\n"
+        "前年の別ファイルは読まず、倍率を小数点以下4桁に四捨五入し、計算不能は空欄とします。\n"
+        "2022年のstep0013はstep0012をそのままコピーします。同名出力は上書きしません。\n"
         "飼育日数平均と稼動日数を残し、当年・前年の稼動日数の年間合計をO列に設定します。\n"
         "2022年は前年を読まず39行で出力します。同名出力は上書きしません。\n"
         "外部購入の日令はTSVに保持し、最終Excelの飼育日数平均だけ空欄にします。\n"
