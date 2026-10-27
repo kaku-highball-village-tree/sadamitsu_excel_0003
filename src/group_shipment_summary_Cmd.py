@@ -16634,6 +16634,115 @@ def create_step0012_variety_files(arrStep0011Paths: List[str]) -> List[str]:
     return arrCreatedPaths
 
 
+def find_step0011_variety_deduction_files(
+    arrStep0010Paths: List[str],
+) -> List[str]:
+    """今回の年間出力に対応する、作成済みの控除廃棄版step0011を探します。"""
+    arrPaths: List[str] = []
+    objSeen: set = set()
+    for pszPath in arrStep0010Paths:
+        objMatch = re.fullmatch(
+            r"(.+)_step0010_品種別_控除廃棄_([0-9]{4})_年間(?:_[0-9]+)?\.tsv",
+            os.path.basename(pszPath),
+        )
+        if objMatch is None:
+            raise_conversion_error("STEP0012_VARIETY_DEDUCTION_INVALID_SOURCE_NAME", "Path = " + pszPath)
+        pszPrefix, pszYear = objMatch.groups()
+        pszDirectory = os.path.dirname(os.path.abspath(pszPath))
+        objKey = (pszDirectory, pszPrefix, pszYear)
+        if objKey in objSeen:
+            continue
+        objSeen.add(objKey)
+        pszPattern = (
+            re.escape(pszPrefix) + r"_step0011_品種別_控除廃棄_"
+            + pszYear + r"_年間(?:_[0-9]+)?\.tsv"
+        )
+        for pszName in sorted(os.listdir(pszDirectory)):
+            if re.fullmatch(pszPattern, pszName):
+                arrPaths.append(os.path.join(pszDirectory, pszName))
+    return arrPaths
+
+
+def create_step0012_variety_deduction_files(arrStep0011Paths: List[str]) -> List[str]:
+    """控除廃棄版品種別当年表に空行2行と前年合計・稼動日数7行を追加します。"""
+    dicInputs: Dict[Tuple[str, str, int], str] = {}
+    for pszPath in arrStep0011Paths:
+        objMatch = re.fullmatch(
+            r"(.+)_step0011_品種別_控除廃棄_([0-9]{4})_年間(?:_[0-9]+)?\.tsv",
+            os.path.basename(pszPath),
+        )
+        if objMatch is None:
+            raise_conversion_error("STEP0012_VARIETY_DEDUCTION_INVALID_NAME", "Path = " + pszPath)
+        pszPrefix, pszYear = objMatch.groups()
+        objKey = (os.path.dirname(os.path.abspath(pszPath)), pszPrefix, int(pszYear))
+        if objKey in dicInputs:
+            raise_conversion_error("STEP0012_VARIETY_DEDUCTION_DUPLICATE_YEAR", "Path = " + pszPath)
+        dicInputs[objKey] = pszPath
+
+    def read_annual(pszPath: str, iYear: int) -> Tuple[bytes, List[List[str]]]:
+        with open(pszPath, "rb") as objFile:
+            objData = objFile.read()
+        arrRows = [line.split("\t") for line in objData.decode("utf-8-sig").splitlines()]
+        arrStructure = [("", "年"), ("", "月")]
+        for pszName in [name for _, name in SPLIT_VARIETIES] + ["合計"]:
+            arrStructure.extend(
+                (pszName if i == 0 else "", item)
+                for i, item in enumerate(STEP0008_VARIETY_DEDUCTION_ITEM_NAMES)
+            )
+        arrStructure.append(("", "稼動日数"))
+        if (len(arrRows) != 39 or any(len(row) != 15 for row in arrRows)
+                or [tuple(row[:2]) for row in arrRows] != arrStructure
+                or arrRows[0] != ["", "年"] + [str(iYear)] * 12 + [""]
+                or arrRows[1] != ["", "月"] + [str(m) for m in range(1, 13)] + ["合計"]):
+            raise ValueError("控除廃棄版品種別年間表の行数・列数・年月見出し・項目構成が不正です。Path = " + pszPath)
+        for value in arrRows[38][2:14]:
+            if value != "" and re.fullmatch(r"[0-9]+", value) is None:
+                raise ValueError("稼動日数は空欄または非負の整数である必要があります。Path = " + pszPath)
+        return objData, arrRows
+
+    arrCreatedPaths: List[str] = []
+    arrErrors: List[str] = []
+    for (pszDirectory, pszPrefix, iYear), pszInputPath in sorted(dicInputs.items()):
+        pszOutputPath = os.path.join(
+            pszDirectory, f"{pszPrefix}_step0012_品種別_控除廃棄_{iYear:04d}_年間.tsv"
+        )
+        bReserved = False
+        try:
+            objCurrent, arrCurrentRows = read_annual(pszInputPath, iYear)
+            pszNewline = "\r\n" if b"\r\n" in objCurrent else ("\r" if b"\r" in objCurrent else "\n")
+            objNewline = pszNewline.encode("ascii")
+            arrLines = objCurrent.splitlines(keepends=True)
+            objBody = arrLines[38].rstrip(b"\r\n")
+            arrFields = objBody.split(b"\t")
+            arrFields[14] = str(sum(int(v) for v in arrCurrentRows[38][2:14] if v)).encode("ascii")
+            arrLines[38] = b"\t".join(arrFields) + arrLines[38][len(objBody):]
+            objOutput = b"".join(arrLines)
+            if iYear != 2022:
+                pszPreviousPath = dicInputs.get(
+                    (pszDirectory, pszPrefix, iYear - 1),
+                    os.path.join(pszDirectory, f"{pszPrefix}_step0011_品種別_控除廃棄_{iYear - 1:04d}_年間.tsv"),
+                )
+                _, arrPreviousRows = read_annual(pszPreviousPath, iYear - 1)
+                arrTotals = [list(row) for row in arrPreviousRows[32:39]]
+                arrTotals[0][0] = "前年実績"
+                arrTotals[1][0] = f"{iYear - 1}年"
+                arrTotals[6][14] = str(sum(int(v) for v in arrTotals[6][2:14] if v))
+                objOutput = objOutput.rstrip(b"\r\n") + objNewline * 3
+                objOutput += (pszNewline.join("\t".join(row) for row in arrTotals) + pszNewline).encode("utf-8")
+            with open(pszOutputPath, "xb") as objFile:
+                bReserved = True
+                objFile.write(objOutput)
+            bReserved = False
+            arrCreatedPaths.append(pszOutputPath)
+        except (OSError, UnicodeError, ValueError) as objException:
+            if bReserved:
+                os.remove(pszOutputPath)
+            arrErrors.append(pszInputPath + ": " + str(objException))
+    if arrErrors:
+        raise_conversion_error("STEP0012_VARIETY_DEDUCTION_FAILED", "\n".join(arrErrors))
+    return arrCreatedPaths
+
+
 def create_step0012_group_files(arrStep0011Paths: List[str]) -> List[str]:
     """当年表に前年合計6行を追加し、稼動日数の年間合計を出力します。"""
     dicInputs: Dict[Tuple[str, str, int], str] = {}
@@ -17357,6 +17466,12 @@ def main() -> int:
                 arrStep0010VarietyDeductionAnnualPaths
             )
         )
+        arrStep0011VarietyDeductionPaths = find_step0011_variety_deduction_files(
+            arrStep0010VarietyDeductionAnnualPaths
+        )
+        arrStep0012VarietyDeductionPaths = create_step0012_variety_deduction_files(
+            arrStep0011VarietyDeductionPaths
+        )
         arrStep0003Paths, arrStep0003YearMonths = create_step0003_files(
             arrAggregatedTsvPaths, objLastYearMonth[0]
         )
@@ -17683,6 +17798,9 @@ def main() -> int:
         "step0010品種別年間Excelファイル数: "
         + str(len(arrStep0010VarietyExcelPaths))
     )
+    print("step0012品種別控除廃棄年間ファイル数: " + str(len(arrStep0012VarietyDeductionPaths)))
+    for pszPath in arrStep0012VarietyDeductionPaths:
+        print("step0012品種別控除廃棄年間ファイル: " + pszPath)
     print("step0011品種別年間ファイル数: " + str(len(arrStep0011VarietyPaths)))
     for pszPath in arrStep0011VarietyPaths:
         print("step0011品種別年間ファイル: " + pszPath)
