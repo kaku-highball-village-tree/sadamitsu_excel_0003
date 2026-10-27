@@ -271,6 +271,13 @@ def run_excel_to_tsv(pszInputExcelPath: str) -> None:
     ]
     if arrStep0012VarietyPaths:
         pszMessage += "\n\n前年実績付きstep0012 品種別TSV:\n" + "\n".join(arrStep0012VarietyPaths)
+    arrStep0013VarietyPaths: List[str] = [
+        line[len("step0013品種別年間ファイル: ") :]
+        for line in pszStdOut.splitlines()
+        if line.startswith("step0013品種別年間ファイル: ")
+    ]
+    if arrStep0013VarietyPaths:
+        pszMessage += "\n\n一日平均出荷羽数の前年比付きstep0013 品種別TSV:\n" + "\n".join(arrStep0013VarietyPaths)
     arrStep0012Paths: List[str] = [
         line[len("step0012グループ別年間ファイル: ") :]
         for line in pszStdOut.splitlines()
@@ -423,6 +430,9 @@ def draw_instruction_text(iWindowHandle: int) -> None:
         "step0010品種別Excelの各列幅を自動調整します。\n"
         "品種別step0011当年表に空行2行と前年の合計6項目・稼動日数の7行を追加し、\n"
         "step0012品種別年間TSVを出力します。\n"
+        "当年step0012内の前年実績を使い、40・41行目に一日平均出荷羽数の前年比を表示した\n"
+        "step0013品種別年間TSVを出力します。前年ファイルは再読込しません。\n"
+        "前年比は倍率で小数点以下4桁に四捨五入し、計算不能は空欄、2022年はそのままコピーします。\n"
         "当年・前年の稼動日数の年間合計をO列に整数で設定します。\n"
         "前年欄は前年実績・前年の年表記とし、2022年は前年行と空行を追加しません。\n"
         "入雛羽数・処理羽数・処理重量・控除後平均体重・\n"
