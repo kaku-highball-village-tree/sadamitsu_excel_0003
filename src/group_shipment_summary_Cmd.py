@@ -14907,6 +14907,266 @@ def read_step0010_variety_deduction_for_excel(
     return arrRows
 
 
+def read_step0013_variety_for_excel(pszInputPath: str) -> List[List[str]]:
+    """前年実績・前年比付き通常版年間表を検証します。"""
+    objMatch = re.fullmatch(
+        r"(.+)_step0013_品種別_([0-9]{4})_年間(?:_[0-9]+)?\.tsv",
+        os.path.basename(pszInputPath),
+    )
+    if objMatch is None:
+        raise_conversion_error("INVALID_STEP0013_VARIETY_EXCEL_FILENAME", pszInputPath)
+    iYear = int(objMatch.group(2))
+    try:
+        with open(pszInputPath, "r", encoding="utf-8-sig", newline="") as objFile:
+            arrRows = [strip_line_ending(line).split("\t") for line in objFile]
+    except (OSError, UnicodeError) as objException:
+        raise_conversion_error("STEP0013_VARIETY_EXCEL_READ_FAILED", str(objException))
+    arrStructure = [("", "年"), ("", "月")]
+    for pszName in [name for _, name in SPLIT_VARIETIES] + ["合計"]:
+        arrStructure.extend((pszName if i == 0 else "", item)
+                            for i, item in enumerate(STEP0008_VARIETY_ITEM_NAMES))
+    arrStructure.append(("", "稼動日数"))
+    if iYear != 2022:
+        arrStructure += [("出荷羽数", "前年比"), ("", "(一日平均)"),
+                         ("前年実績", "入雛羽数"), (f"{iYear - 1}年", "出荷羽数"),
+                         ("", "正味重量"), ("", "平均体重"),
+                         ("", "飼育日数平均"), ("", "育成率"), ("", "稼動日数")]
+    if (len(arrRows) != len(arrStructure) or any(len(row) != 15 for row in arrRows)
+            or [tuple(row[:2]) for row in arrRows] != arrStructure):
+        raise_conversion_error("INVALID_STEP0013_VARIETY_EXCEL_STRUCTURE", pszInputPath)
+    if (arrRows[0] != ["", "年"] + [str(iYear)] * 12 + [""]
+            or arrRows[1] != ["", "月"] + [str(m) for m in range(1, 13)] + ["合計"]):
+        raise_conversion_error("INVALID_STEP0013_VARIETY_EXCEL_HEADER", pszInputPath)
+    for iRow, row in enumerate(arrRows[2:], start=2):
+        if row[1] == "(一日平均)":
+            if any(row[2:]):
+                raise_conversion_error("INVALID_STEP0013_VARIETY_EXCEL_NOTE", pszInputPath)
+            continue
+        for value in row[2:]:
+            if value == "":
+                continue
+            try:
+                objValue = Decimal(value)
+                if not objValue.is_finite():
+                    raise ValueError("non-finite value")
+                if row[1] in {"入雛羽数", "出荷羽数", "稼動日数"} and objValue != objValue.to_integral_value():
+                    raise ValueError("count must be integer")
+                if row[1] == "稼動日数" and objValue < 0:
+                    raise ValueError("negative operating days")
+            except (ArithmeticError, ValueError):
+                raise_conversion_error("INVALID_STEP0013_VARIETY_EXCEL_VALUE",
+                                       pszInputPath + ": " + str(iRow + 1))
+    return arrRows
+
+
+def create_step0013_variety_excel_output_path(
+    pszStep0013TsvPath: str,
+) -> str:
+    pszDirectory: str = os.path.dirname(pszStep0013TsvPath)
+    pszStem: str = os.path.splitext(os.path.basename(pszStep0013TsvPath))[0]
+    pszOutputPath: str = os.path.join(pszDirectory, pszStem + ".xlsx")
+    iSuffix: int = 2
+    while os.path.exists(pszOutputPath):
+        pszOutputPath = os.path.join(
+            pszDirectory, f"{pszStem}_{iSuffix:02d}.xlsx"
+        )
+        iSuffix += 1
+    return pszOutputPath
+
+
+def write_step0013_variety_excel(
+    pszOutputPath: str, arrRows: List[List[str]]
+) -> None:
+    pszTemporaryPath: str = ""
+    bOutputReserved: bool = False
+    objWorkbook: Optional[Workbook] = None
+    try:
+        try:
+            iFileDescriptor: int = os.open(
+                pszOutputPath, os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            )
+            os.close(iFileDescriptor)
+            bOutputReserved = True
+        except FileExistsError:
+            raise_conversion_error(
+                "STEP0013_VARIETY_EXCEL_CREATE_FAILED",
+                "variety step0013 Excel already exists. Path = "
+                + pszOutputPath,
+            )
+        except OSError as objException:
+            raise_conversion_error(
+                "STEP0013_VARIETY_EXCEL_CREATE_FAILED",
+                "failed to reserve variety step0013 Excel. Detail = "
+                + str(objException),
+            )
+        try:
+            iTemporaryFileDescriptor, pszTemporaryPath = tempfile.mkstemp(
+                prefix="group_shipment_summary_step0013_variety_",
+                suffix=".xlsx",
+                dir=os.path.dirname(pszOutputPath),
+            )
+            os.close(iTemporaryFileDescriptor)
+            objWorkbook = Workbook()
+            objWorksheet = objWorkbook.active
+            objWorksheet.title = "品種別"
+            pszCurrentVariety: str = ""
+            for iRowIndex, arrFields in enumerate(arrRows, start=1):
+                if arrFields[0].strip(" \u3000\t"):
+                    pszCurrentVariety = arrFields[0].strip(" \u3000\t")
+                pszRowType: str = arrFields[1].strip(" \u3000\t")
+                for iColumnIndex, pszValue in enumerate(arrFields, start=1):
+                    objCell = objWorksheet.cell(iRowIndex, iColumnIndex)
+                    if iColumnIndex <= 2 or (
+                        iRowIndex == 2 and iColumnIndex == 15
+                    ):
+                        objCell.value = pszValue if pszValue != "" else None
+                        continue
+                    if (
+                        pszCurrentVariety == BROILER_BREAKDOWNS[1][1]
+                        and pszRowType == "飼育日数平均"
+                    ):
+                        continue
+                    pszNormalizedValue: str = pszValue.strip(" \u3000\t")
+                    if pszNormalizedValue == "":
+                        continue
+                    objValue: Decimal = Decimal(pszNormalizedValue)
+                    objCell.value = (
+                        int(objValue) if objValue == objValue.to_integral_value()
+                        else float(objValue)
+                    )
+                    if pszRowType in {"年", "月", "入雛羽数", "出荷羽数", "稼動日数"}:
+                        objCell.number_format = "0"
+                    elif pszRowType == "前年比":
+                        objCell.number_format = "0.0000"
+                    elif pszRowType == "正味重量":
+                        iDecimalPlaces: int = max(
+                            0, -objValue.as_tuple().exponent
+                        )
+                        objCell.number_format = (
+                            "0." + "#" * iDecimalPlaces
+                            if iDecimalPlaces else "0"
+                        )
+                    elif pszRowType in {"平均体重", "飼育日数平均"}:
+                        objCell.number_format = (
+                            "0" if objValue == objValue.to_integral_value()
+                            else "0.###"
+                        )
+                    elif pszRowType in {"育成率", "育成率"}:
+                        objCell.number_format = (
+                            "0" if objValue == objValue.to_integral_value()
+                            else "0.####"
+                        )
+            for iColumnIndex in range(1, objWorksheet.max_column + 1):
+                iMaximumDisplayWidth = 0
+                for objWidthColumn in objWorksheet.iter_cols(
+                    min_col=iColumnIndex,
+                    max_col=iColumnIndex,
+                    min_row=1,
+                    max_row=objWorksheet.max_row,
+                ):
+                    for objWidthCell in objWidthColumn:
+                        objWidthValue = objWidthCell.value
+                        if objWidthValue is None:
+                            continue
+                        if isinstance(objWidthValue, (int, float, Decimal)):
+                            objWidthDecimal = Decimal(str(objWidthValue))
+                            pszFractionFormat = (
+                                objWidthCell.number_format.split(";")[0]
+                                .partition(".")[2]
+                            )
+                            iFractionPlaces = sum(
+                                1 for pszCharacter in pszFractionFormat
+                                if pszCharacter in "0#"
+                            )
+                            pszDisplayValue = format(
+                                objWidthDecimal,
+                                "." + str(iFractionPlaces) + "f",
+                            )
+                            if iFractionPlaces:
+                                iMinimumFractionPlaces = pszFractionFormat.count("0")
+                                while (
+                                    len(pszDisplayValue.rsplit(".", 1)[-1])
+                                    > iMinimumFractionPlaces
+                                    and pszDisplayValue.endswith("0")
+                                ):
+                                    pszDisplayValue = pszDisplayValue[:-1]
+                                if pszDisplayValue.endswith("."):
+                                    pszDisplayValue = pszDisplayValue[:-1]
+                        else:
+                            pszDisplayValue = str(objWidthValue)
+                        iDisplayWidth = sum(
+                            2 if unicodedata.east_asian_width(pszCharacter)
+                            in {"F", "W"}
+                            else 1
+                            for pszCharacter in pszDisplayValue
+                        )
+                        iMaximumDisplayWidth = max(
+                            iMaximumDisplayWidth, iDisplayWidth
+                        )
+                objWorksheet.column_dimensions[
+                    get_column_letter(iColumnIndex)
+                ].width = min(max(iMaximumDisplayWidth + 2, 8), 255)
+            objWorkbook.save(pszTemporaryPath)
+            objWorkbook.close()
+            objWorkbook = None
+        except Exception as objException:
+            raise_conversion_error(
+                "STEP0013_VARIETY_EXCEL_WRITE_FAILED",
+                "failed to write variety step0013 Excel. Detail = "
+                + str(objException),
+            )
+        try:
+            os.replace(pszTemporaryPath, pszOutputPath)
+            pszTemporaryPath = ""
+            bOutputReserved = False
+        except Exception as objException:
+            raise_conversion_error(
+                "STEP0013_VARIETY_EXCEL_FINALIZE_FAILED",
+                "failed to finalize variety step0013 Excel. Detail = "
+                + str(objException),
+            )
+    finally:
+        if objWorkbook is not None:
+            objWorkbook.close()
+        if pszTemporaryPath and os.path.exists(pszTemporaryPath):
+            os.remove(pszTemporaryPath)
+        if bOutputReserved and os.path.exists(pszOutputPath):
+            os.remove(pszOutputPath)
+
+
+def create_step0013_variety_excel_files(
+    arrStep0013VarietyTsvPaths: List[str],
+) -> List[str]:
+    """通常版品種別step0013年間TSVからExcelを作成します。"""
+    arrCreatedPaths: List[str] = []
+    try:
+        for pszStep0013TsvPath in arrStep0013VarietyTsvPaths:
+            arrRows = read_step0013_variety_for_excel(
+                pszStep0013TsvPath
+            )
+            pszOutputPath = create_step0013_variety_excel_output_path(
+                pszStep0013TsvPath
+            )
+            write_step0013_variety_excel(pszOutputPath, arrRows)
+            arrCreatedPaths.append(pszOutputPath)
+        return arrCreatedPaths
+    except Exception as objException:
+        arrCleanupErrors: List[str] = []
+        for pszPath in arrCreatedPaths:
+            try:
+                os.remove(pszPath)
+            except Exception as objCleanupException:
+                arrCleanupErrors.append(pszPath + ": " + str(objCleanupException))
+        if arrCleanupErrors:
+            raise_conversion_error(
+                "STEP0013_VARIETY_EXCEL_CLEANUP_FAILED",
+                "variety step0013 Excel creation failed. "
+                "Original error = " + str(objException) + "; cleanup errors = "
+                + " | ".join(arrCleanupErrors),
+            )
+        raise
+
+
 def read_step0013_variety_deduction_for_excel(pszInputPath: str) -> List[List[str]]:
     """前年実績・前年比付き控除廃棄版年間表を検証します。"""
     objMatch = re.fullmatch(
@@ -17659,14 +17919,14 @@ def main() -> int:
         arrStep0010VarietyAnnualPaths = create_step0010_variety_annual_files(
             arrStep0009VarietyAnnualPaths
         )
-        arrStep0010VarietyExcelPaths = create_step0010_variety_excel_files(
-            arrStep0010VarietyAnnualPaths
-        )
         arrStep0011VarietyPaths = create_step0011_variety_files(
             arrStep0010VarietyAnnualPaths, arrDailyOperationPaths
         )
         arrStep0012VarietyPaths = create_step0012_variety_files(arrStep0011VarietyPaths)
         arrStep0013VarietyPaths = create_step0013_variety_files(arrStep0012VarietyPaths)
+        arrStep0013VarietyExcelPaths = create_step0013_variety_excel_files(
+            arrStep0013VarietyPaths
+        )
         (
             arrStep0004VarietyDeductionPaths,
             arrStep0004VarietyDeductionYearMonths,
@@ -18055,8 +18315,8 @@ def main() -> int:
         + str(len(arrStep0010VarietyAnnualPaths))
     )
     print(
-        "step0010品種別年間Excelファイル数: "
-        + str(len(arrStep0010VarietyExcelPaths))
+        "step0013品種別年間Excelファイル数: "
+        + str(len(arrStep0013VarietyExcelPaths))
     )
     for pszPath in arrStep0013VarietyDeductionExcelPaths:
         print("step0013品種別控除廃棄年間Excelファイル: " + pszPath)
@@ -18069,6 +18329,8 @@ def main() -> int:
     print("step0013品種別控除廃棄年間ファイル数: " + str(len(arrStep0013VarietyDeductionPaths)))
     for pszPath in arrStep0013VarietyDeductionPaths:
         print("step0013品種別控除廃棄年間ファイル: " + pszPath)
+    for pszPath in arrStep0013VarietyExcelPaths:
+        print("step0013品種別年間Excelファイル: " + pszPath)
     print("step0011品種別年間ファイル数: " + str(len(arrStep0011VarietyPaths)))
     for pszPath in arrStep0011VarietyPaths:
         print("step0011品種別年間ファイル: " + pszPath)
