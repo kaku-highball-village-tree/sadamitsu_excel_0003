@@ -14874,11 +14874,63 @@ def read_step0010_variety_deduction_for_excel(
     return arrRows
 
 
-def create_step0010_variety_deduction_excel_output_path(
-    pszStep0010TsvPath: str,
+def read_step0013_variety_deduction_for_excel(pszInputPath: str) -> List[List[str]]:
+    """前年実績・前年比付き控除廃棄版年間表を検証します。"""
+    objMatch = re.fullmatch(
+        r"(.+)_step0013_品種別_控除廃棄_([0-9]{4})_年間(?:_[0-9]+)?\.tsv",
+        os.path.basename(pszInputPath),
+    )
+    if objMatch is None:
+        raise_conversion_error("INVALID_STEP0013_VARIETY_DEDUCTION_EXCEL_FILENAME", pszInputPath)
+    iYear = int(objMatch.group(2))
+    try:
+        with open(pszInputPath, "r", encoding="utf-8-sig", newline="") as objFile:
+            arrRows = [strip_line_ending(line).split("\t") for line in objFile]
+    except (OSError, UnicodeError) as objException:
+        raise_conversion_error("STEP0013_VARIETY_DEDUCTION_EXCEL_READ_FAILED", str(objException))
+    arrStructure = [("", "年"), ("", "月")]
+    for pszName in [name for _, name in SPLIT_VARIETIES] + ["合計"]:
+        arrStructure.extend((pszName if i == 0 else "", item)
+                            for i, item in enumerate(STEP0008_VARIETY_DEDUCTION_ITEM_NAMES))
+    arrStructure.append(("", "稼動日数"))
+    if iYear != 2022:
+        arrStructure += [("処理羽数", "前年比"), ("", "(一日平均)"),
+                         ("前年実績", "入雛羽数"), (f"{iYear - 1}年", "処理羽数"),
+                         ("", "処理重量"), ("", "控除後平均体重"),
+                         ("", "飼育日数平均"), ("", "育成率"), ("", "稼動日数")]
+    if (len(arrRows) != len(arrStructure) or any(len(row) != 15 for row in arrRows)
+            or [tuple(row[:2]) for row in arrRows] != arrStructure):
+        raise_conversion_error("INVALID_STEP0013_VARIETY_DEDUCTION_EXCEL_STRUCTURE", pszInputPath)
+    if (arrRows[0] != ["", "年"] + [str(iYear)] * 12 + [""]
+            or arrRows[1] != ["", "月"] + [str(m) for m in range(1, 13)] + ["合計"]):
+        raise_conversion_error("INVALID_STEP0013_VARIETY_DEDUCTION_EXCEL_HEADER", pszInputPath)
+    for iRow, row in enumerate(arrRows[2:], start=2):
+        if row[1] == "(一日平均)":
+            if any(row[2:]):
+                raise_conversion_error("INVALID_STEP0013_VARIETY_DEDUCTION_EXCEL_NOTE", pszInputPath)
+            continue
+        for value in row[2:]:
+            if value == "":
+                continue
+            try:
+                objValue = Decimal(value)
+                if not objValue.is_finite():
+                    raise ValueError("non-finite value")
+                if row[1] in {"入雛羽数", "処理羽数", "稼動日数"} and objValue != objValue.to_integral_value():
+                    raise ValueError("count must be integer")
+                if row[1] == "稼動日数" and objValue < 0:
+                    raise ValueError("negative operating days")
+            except (ArithmeticError, ValueError):
+                raise_conversion_error("INVALID_STEP0013_VARIETY_DEDUCTION_EXCEL_VALUE",
+                                       pszInputPath + ": " + str(iRow + 1))
+    return arrRows
+
+
+def create_step0013_variety_deduction_excel_output_path(
+    pszStep0013TsvPath: str,
 ) -> str:
-    pszDirectory: str = os.path.dirname(pszStep0010TsvPath)
-    pszStem: str = os.path.splitext(os.path.basename(pszStep0010TsvPath))[0]
+    pszDirectory: str = os.path.dirname(pszStep0013TsvPath)
+    pszStem: str = os.path.splitext(os.path.basename(pszStep0013TsvPath))[0]
     pszOutputPath: str = os.path.join(pszDirectory, pszStem + ".xlsx")
     iSuffix: int = 2
     while os.path.exists(pszOutputPath):
@@ -14889,7 +14941,7 @@ def create_step0010_variety_deduction_excel_output_path(
     return pszOutputPath
 
 
-def write_step0010_variety_deduction_excel(
+def write_step0013_variety_deduction_excel(
     pszOutputPath: str, arrRows: List[List[str]]
 ) -> None:
     pszTemporaryPath: str = ""
@@ -14905,18 +14957,18 @@ def write_step0010_variety_deduction_excel(
         except FileExistsError:
             raise_conversion_error(
                 "STEP0010_VARIETY_DEDUCTION_EXCEL_CREATE_FAILED",
-                "variety deduction step0010 Excel already exists. Path = "
+                "variety deduction step0013 Excel already exists. Path = "
                 + pszOutputPath,
             )
         except OSError as objException:
             raise_conversion_error(
                 "STEP0010_VARIETY_DEDUCTION_EXCEL_CREATE_FAILED",
-                "failed to reserve variety deduction step0010 Excel. Detail = "
+                "failed to reserve variety deduction step0013 Excel. Detail = "
                 + str(objException),
             )
         try:
             iTemporaryFileDescriptor, pszTemporaryPath = tempfile.mkstemp(
-                prefix="group_shipment_summary_step0010_variety_deduction_",
+                prefix="group_shipment_summary_step0013_variety_deduction_",
                 suffix=".xlsx",
                 dir=os.path.dirname(pszOutputPath),
             )
@@ -14949,8 +15001,10 @@ def write_step0010_variety_deduction_excel(
                         int(objValue) if objValue == objValue.to_integral_value()
                         else float(objValue)
                     )
-                    if pszRowType in {"年", "月", "入雛羽数", "処理羽数"}:
+                    if pszRowType in {"年", "月", "入雛羽数", "処理羽数", "稼動日数"}:
                         objCell.number_format = "0"
+                    elif pszRowType == "前年比":
+                        objCell.number_format = "0.0000"
                     elif pszRowType == "処理重量":
                         iDecimalPlaces: int = max(
                             0, -objValue.as_tuple().exponent
@@ -15025,7 +15079,7 @@ def write_step0010_variety_deduction_excel(
         except Exception as objException:
             raise_conversion_error(
                 "STEP0010_VARIETY_DEDUCTION_EXCEL_WRITE_FAILED",
-                "failed to write variety deduction step0010 Excel. Detail = "
+                "failed to write variety deduction step0013 Excel. Detail = "
                 + str(objException),
             )
         try:
@@ -15035,7 +15089,7 @@ def write_step0010_variety_deduction_excel(
         except Exception as objException:
             raise_conversion_error(
                 "STEP0010_VARIETY_DEDUCTION_EXCEL_FINALIZE_FAILED",
-                "failed to finalize variety deduction step0010 Excel. Detail = "
+                "failed to finalize variety deduction step0013 Excel. Detail = "
                 + str(objException),
             )
     finally:
@@ -15047,20 +15101,20 @@ def write_step0010_variety_deduction_excel(
             os.remove(pszOutputPath)
 
 
-def create_step0010_variety_deduction_excel_files(
-    arrStep0010VarietyDeductionTsvPaths: List[str],
+def create_step0013_variety_deduction_excel_files(
+    arrStep0013VarietyDeductionTsvPaths: List[str],
 ) -> List[str]:
-    """控除廃棄版品種別step0010年間TSVからExcelを作成します。"""
+    """控除廃棄版品種別step0013年間TSVからExcelを作成します。"""
     arrCreatedPaths: List[str] = []
     try:
-        for pszStep0010TsvPath in arrStep0010VarietyDeductionTsvPaths:
-            arrRows = read_step0010_variety_deduction_for_excel(
-                pszStep0010TsvPath
+        for pszStep0013TsvPath in arrStep0013VarietyDeductionTsvPaths:
+            arrRows = read_step0013_variety_deduction_for_excel(
+                pszStep0013TsvPath
             )
-            pszOutputPath = create_step0010_variety_deduction_excel_output_path(
-                pszStep0010TsvPath
+            pszOutputPath = create_step0013_variety_deduction_excel_output_path(
+                pszStep0013TsvPath
             )
-            write_step0010_variety_deduction_excel(pszOutputPath, arrRows)
+            write_step0013_variety_deduction_excel(pszOutputPath, arrRows)
             arrCreatedPaths.append(pszOutputPath)
         return arrCreatedPaths
     except Exception as objException:
@@ -15073,7 +15127,7 @@ def create_step0010_variety_deduction_excel_files(
         if arrCleanupErrors:
             raise_conversion_error(
                 "STEP0010_VARIETY_DEDUCTION_EXCEL_CLEANUP_FAILED",
-                "variety deduction step0010 Excel creation failed. "
+                "variety deduction step0013 Excel creation failed. "
                 "Original error = " + str(objException) + "; cleanup errors = "
                 + " | ".join(arrCleanupErrors),
             )
@@ -17630,11 +17684,6 @@ def main() -> int:
                 arrStep0009VarietyDeductionPaths
             )
         )
-        arrStep0010VarietyDeductionExcelPaths = (
-            create_step0010_variety_deduction_excel_files(
-                arrStep0010VarietyDeductionAnnualPaths
-            )
-        )
         arrStep0011VarietyDeductionPaths = create_step0011_variety_deduction_files(
             arrStep0010VarietyDeductionAnnualPaths, arrDailyOperationPaths
         )
@@ -17643,6 +17692,9 @@ def main() -> int:
         )
         arrStep0013VarietyDeductionPaths = create_step0013_variety_deduction_files(
             arrStep0012VarietyDeductionPaths
+        )
+        arrStep0013VarietyDeductionExcelPaths = create_step0013_variety_deduction_excel_files(
+            arrStep0013VarietyDeductionPaths
         )
         arrStep0003Paths, arrStep0003YearMonths = create_step0003_files(
             arrAggregatedTsvPaths, objLastYearMonth[0]
@@ -17944,8 +17996,8 @@ def main() -> int:
         + str(len(arrStep0010VarietyDeductionAnnualPaths))
     )
     print(
-        "step0010品種別控除廃棄年間Excelファイル数: "
-        + str(len(arrStep0010VarietyDeductionExcelPaths))
+        "step0013品種別控除廃棄年間Excelファイル数: "
+        + str(len(arrStep0013VarietyDeductionExcelPaths))
     )
     print("step0005品種別年間ファイル数: " + str(len(arrStep0005VarietyPaths)))
     print("step0006品種別年間ファイル数: " + str(len(arrStep0006VarietyPaths)))
@@ -17970,6 +18022,8 @@ def main() -> int:
         "step0010品種別年間Excelファイル数: "
         + str(len(arrStep0010VarietyExcelPaths))
     )
+    for pszPath in arrStep0013VarietyDeductionExcelPaths:
+        print("step0013品種別控除廃棄年間Excelファイル: " + pszPath)
     print("step0011品種別控除廃棄年間ファイル数: " + str(len(arrStep0011VarietyDeductionPaths)))
     for pszPath in arrStep0011VarietyDeductionPaths:
         print("step0011品種別控除廃棄年間ファイル: " + pszPath)
