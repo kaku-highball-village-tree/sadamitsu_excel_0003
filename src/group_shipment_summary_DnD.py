@@ -334,6 +334,13 @@ def run_excel_to_tsv(pszInputExcelPath: str) -> None:
     ]
     if arrStep0013Paths:
         pszMessage += "\n\n一日平均出荷羽数の前年比付きstep0013 TSV:\n" + "\n".join(arrStep0013Paths)
+    arrNamedGroupSummaryExcelPaths: List[str] = [
+        line[len("年付きグループ別集計Excelファイル: ") :]
+        for line in pszStdOut.splitlines()
+        if line.startswith("年付きグループ別集計Excelファイル: ")
+    ]
+    if arrNamedGroupSummaryExcelPaths:
+        pszMessage += "\n\n年付きグループ別集計Excel:\n" + "\n".join(arrNamedGroupSummaryExcelPaths)
     if pszWarningFilePath:
         pszMessage += "\n\n警告ファイル:\n" + pszWarningFilePath
     show_completion_dialog(os.path.dirname(pszOutputTsvPath), bool(pszWarningFilePath), pszMessage)
@@ -610,6 +617,8 @@ def draw_instruction_text(iWindowHandle: int) -> None:
         "step0013グループ別年間TSVを読み込み、同じstep0013名のExcelを作成します。\n"
         "step0013グループ別Excelの各列幅を自動調整し、step0010グループ別Excelは作成しません。\n"
         "step0013グループ別Excelを年別の〇グループ別集計_YYYY年.xlsx名でも出力します。\n"
+        "対象年は元Excelのファイル名から取得し、同じフォルダへ内容をそのままコピーします。\n"
+        "同名ファイルがある場合は_02などの連番を付け、元Excelは変更しません。\n"
         "step0015控除廃棄当年表にも空行2行と前年の合計6行を加え、step0016を出力します。\n"
         "項目は入雛羽数・処理羽数・処理重量・平均体重・育成率・稼動日数です。\n"
         "前年欄は前年実績・前年の年表記とし、2022年は前年行を追加しません。\n"

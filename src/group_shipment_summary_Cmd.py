@@ -8546,6 +8546,39 @@ def create_step0012_discard_summary_excel_files(
         raise
 
 
+def create_group_summary_yearly_named_copies(arrExcelPaths: List[str]) -> List[str]:
+    """作成済みグループ別年間Excelを対象年付きの別名でコピーします。"""
+    arrCreatedPaths: List[str] = []
+    try:
+        for pszExcelPath in arrExcelPaths:
+            objMatch = re.fullmatch(
+                r"(.+)_step0013_グループ別_([0-9]{4})_年間(?:_[0-9]+)*\.xlsx",
+                os.path.basename(pszExcelPath),
+            )
+            if objMatch is None:
+                raise_conversion_error(
+                    "INVALID_GROUP_SUMMARY_NAMED_COPY_FILENAME", pszExcelPath
+                )
+            iYear = int(objMatch.group(2))
+            pszDirectory = os.path.dirname(pszExcelPath)
+            pszStem = f"〇グループ別集計_{iYear:04d}年"
+            pszOutputPath = os.path.join(pszDirectory, pszStem + ".xlsx")
+            iSuffix = 2
+            while os.path.exists(pszOutputPath):
+                pszOutputPath = os.path.join(pszDirectory, f"{pszStem}_{iSuffix:02d}.xlsx")
+                iSuffix += 1
+            shutil.copy2(pszExcelPath, pszOutputPath)
+            arrCreatedPaths.append(pszOutputPath)
+        return arrCreatedPaths
+    except Exception:
+        for pszPath in arrCreatedPaths:
+            try:
+                os.remove(pszPath)
+            except OSError:
+                pass
+        raise
+
+
 def create_discard_summary_monthly_named_copies(
     arrExcelPaths: List[str],
 ) -> List[str]:
@@ -17925,6 +17958,9 @@ def main() -> int:
         arrStep0013GroupExcelPaths = create_step0013_group_excel_files(
             arrStep0013GroupPaths
         )
+        arrNamedGroupSummaryExcelPaths = create_group_summary_yearly_named_copies(
+            arrStep0013GroupExcelPaths
+        )
     except Exception as objException:
         pszErrorCode: str = getattr(
             objException, "pszErrorCode", "UNEXPECTED_CONVERSION_ERROR"
@@ -18246,6 +18282,9 @@ def main() -> int:
     print("step0013グループ別Excelファイル数: " + str(len(arrStep0013GroupExcelPaths)))
     for pszPath in arrStep0013GroupExcelPaths:
         print("step0013グループ別Excelファイル: " + pszPath)
+    print("年付きグループ別集計Excelファイル数: " + str(len(arrNamedGroupSummaryExcelPaths)))
+    for pszPath in arrNamedGroupSummaryExcelPaths:
+        print("年付きグループ別集計Excelファイル: " + pszPath)
     print("step0011グループ別年間ファイル数: " + str(len(arrStep0011GroupPaths)))
     print("step0013グループ別年間ファイル数: " + str(len(arrStep0013GroupPaths)))
     for pszPath in arrStep0013GroupPaths:
