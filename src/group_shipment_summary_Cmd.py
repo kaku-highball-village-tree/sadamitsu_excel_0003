@@ -17113,6 +17113,92 @@ def create_step0013_variety_files(arrStep0012Paths: List[str]) -> List[str]:
     return arrCreatedPaths
 
 
+def create_step0013_variety_deduction_files(arrStep0012Paths: List[str]) -> List[str]:
+    """step0012の空行2行を一日平均処理羽数の前年比に置き換えます。"""
+    arrCreatedPaths: List[str] = []
+    arrErrors: List[str] = []
+    for pszInputPath in arrStep0012Paths:
+        bReserved = False
+        pszOutputPath = ""
+        try:
+            objMatch = re.fullmatch(
+                r"(.+)_step0012_品種別_控除廃棄_([0-9]{4})_年間(?:_[0-9]+)?\.tsv",
+                os.path.basename(pszInputPath),
+            )
+            if objMatch is None:
+                raise ValueError("step0012のファイル名が不正です。")
+            pszPrefix, pszYear = objMatch.groups()
+            iYear = int(pszYear)
+            pszOutputPath = os.path.join(
+                os.path.dirname(pszInputPath),
+                f"{pszPrefix}_step0013_品種別_控除廃棄_{iYear:04d}_年間.tsv",
+            )
+            with open(pszInputPath, "rb") as objFile:
+                objInput = objFile.read()
+            objOutput = objInput
+            if iYear != 2022:
+                arrLines = objInput.splitlines(keepends=True)
+                arrRows = [line.split("\t") for line in objInput.decode("utf-8-sig").splitlines()]
+                if (len(arrRows) != 48
+                        or any(len(row) != 15 for i, row in enumerate(arrRows) if i not in (39, 40))):
+                    raise ValueError("step0012は48行で、空行以外は15列である必要があります。")
+                if any(value for i in (39, 40) for value in arrRows[i]):
+                    raise ValueError("40・41行目は空行である必要があります。")
+                if (arrRows[0] != ["", "年"] + [str(iYear)] * 12 + [""]
+                        or arrRows[1] != ["", "月"] + [str(m) for m in range(1, 13)] + ["合計"]):
+                    raise ValueError("step0012の年月見出しが不正です。")
+                arrStructure = [("", "年"), ("", "月")]
+                for pszName in [name for _, name in SPLIT_VARIETIES] + ["合計"]:
+                    arrStructure.extend(
+                        (pszName if i == 0 else "", item)
+                        for i, item in enumerate(STEP0008_VARIETY_DEDUCTION_ITEM_NAMES)
+                    )
+                arrStructure.append(("", "稼動日数"))
+                arrPreviousStructure = [
+                    ("前年実績", "入雛羽数"), (f"{iYear - 1}年", "処理羽数"),
+                    ("", "処理重量"), ("", "控除後平均体重"), ("", "飼育日数平均"),
+                    ("", "育成率"), ("", "稼動日数"),
+                ]
+                if ([tuple(row[:2]) for row in arrRows[:39]] != arrStructure
+                        or [tuple(row[:2]) for row in arrRows[41:48]] != arrPreviousStructure):
+                    raise ValueError("品種・当年合計・前年実績の項目構成が不正です。")
+                for iRow in (38, 47):
+                    if any(v != "" and re.fullmatch(r"[0-9]+", v) is None
+                           for v in arrRows[iRow][2:14]):
+                        raise ValueError("稼動日数は空欄または非負の整数である必要があります。")
+                arrRatios: List[str] = []
+                for iColumn in range(2, 15):
+                    try:
+                        arrValues = [Decimal(arrRows[iRow][iColumn] or "0") for iRow in (33, 38, 42, 47)]
+                        if any(not value.is_finite() for value in arrValues):
+                            raise ValueError("non-finite value")
+                        objCurrent, objCurrentDays, objPrevious, objPreviousDays = arrValues
+                        if objCurrentDays == 0 or objPreviousDays == 0 or objPrevious == 0:
+                            raise ValueError("division by zero")
+                        objRatio = ((objCurrent / objCurrentDays) / (objPrevious / objPreviousDays)).quantize(
+                            Decimal("0.0001"), rounding=ROUND_HALF_UP
+                        )
+                        arrRatios.append(format(objRatio, ".4f"))
+                    except (ArithmeticError, ValueError):
+                        arrRatios.append("")
+                objNewline = b"\r\n" if b"\r\n" in objInput else (b"\r" if b"\r" in objInput else b"\n")
+                arrLines[39] = "\t".join(["処理羽数", "前年比"] + arrRatios).encode("utf-8") + objNewline
+                arrLines[40] = "\t".join(["", "(一日平均)"] + [""] * 13).encode("utf-8") + objNewline
+                objOutput = b"".join(arrLines)
+            with open(pszOutputPath, "xb") as objFile:
+                bReserved = True
+                objFile.write(objOutput)
+            bReserved = False
+            arrCreatedPaths.append(pszOutputPath)
+        except (OSError, UnicodeError, ValueError) as objException:
+            if bReserved:
+                os.remove(pszOutputPath)
+            arrErrors.append(pszInputPath + ": " + str(objException))
+    if arrErrors:
+        raise_conversion_error("STEP0013_VARIETY_DEDUCTION_FAILED", "\n".join(arrErrors))
+    return arrCreatedPaths
+
+
 def create_step0013_group_files(arrStep0012Paths: List[str]) -> List[str]:
     """step0012の空行2行を一日平均出荷羽数の前年比に置き換えます。"""
     arrCreatedPaths: List[str] = []
@@ -17472,6 +17558,9 @@ def main() -> int:
         arrStep0012VarietyDeductionPaths = create_step0012_variety_deduction_files(
             arrStep0011VarietyDeductionPaths
         )
+        arrStep0013VarietyDeductionPaths = create_step0013_variety_deduction_files(
+            arrStep0012VarietyDeductionPaths
+        )
         arrStep0003Paths, arrStep0003YearMonths = create_step0003_files(
             arrAggregatedTsvPaths, objLastYearMonth[0]
         )
@@ -17801,6 +17890,9 @@ def main() -> int:
     print("step0012品種別控除廃棄年間ファイル数: " + str(len(arrStep0012VarietyDeductionPaths)))
     for pszPath in arrStep0012VarietyDeductionPaths:
         print("step0012品種別控除廃棄年間ファイル: " + pszPath)
+    print("step0013品種別控除廃棄年間ファイル数: " + str(len(arrStep0013VarietyDeductionPaths)))
+    for pszPath in arrStep0013VarietyDeductionPaths:
+        print("step0013品種別控除廃棄年間ファイル: " + pszPath)
     print("step0011品種別年間ファイル数: " + str(len(arrStep0011VarietyPaths)))
     for pszPath in arrStep0011VarietyPaths:
         print("step0011品種別年間ファイル: " + pszPath)
